@@ -1,7 +1,7 @@
 
 rule scatter_intervals:
     output:
-        acgt_ivals = "{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/hc_intervals/acgt.interval_list",
+        acgt_ivals  = "{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/hc_intervals/acgt.interval_list",
     params:
         ref_fasta = config['ref_fasta'],
         contig_ns = config['nrun_length'],
@@ -21,7 +21,7 @@ rule scatter_intervals:
 
 checkpoint split_intervals:
     input:
-        acgt_ivals = "{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/hc_intervals/acgt.interval_list",
+        acgt_ivals  = "{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/hc_intervals/acgt.interval_list",
     output:
         directory("{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/hc_intervals/scattered")
     params:
@@ -43,11 +43,11 @@ checkpoint split_intervals:
 
 rule haplotype_caller:
     input:
-        final_cram = S3.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/cram/{sample_name}.{ref}.cram")
-            if not config['left_align'] else S3.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/cram/{sample_name}.{ref}.left_aligned.cram"),
-        final_crai = S3.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/cram/{sample_name}.{ref}.cram.crai")
-            if not config['left_align'] else S3.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/cram/{sample_name}.{ref}.left_aligned.cram.crai"),
-        interval   = "{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/hc_intervals/scattered/{split}-scattered.interval_list"
+        sorted_bam = SFTP.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bam")
+            if not config['left_align'] else SFTP.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.duplicate_marked.sorted.bam"),
+        sorted_bai = SFTP.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bai")
+            if not config['left_align'] else SFTP.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.duplicate_marked.sorted.bai"),
+        interval  = "{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/hc_intervals/scattered/{split}-scattered.interval_list"
     output:
         hc_gvcf = "{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/hc_intervals/scattered/{sample_name}.{split}.g.vcf.gz",
         hc_tbi  = "{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/hc_intervals/scattered/{sample_name}.{split}.g.vcf.gz.tbi"
@@ -65,7 +65,7 @@ rule haplotype_caller:
             gatk --java-options "{params.java_opt}" \
                 HaplotypeCaller \
                 -R {params.ref_fasta} \
-                -I {input.final_cram} \
+                -I {input.sorted_bam} \
                 -L {input.interval} \
                 -O {output.hc_gvcf} \
                 -contamination 0 -ERC GVCF
@@ -75,16 +75,16 @@ def get_gvcfs(wildcards):
     # interval dir from split intervals
     ivals_dir = checkpoints.split_intervals.get(**wildcards).output[0]
     # variable number of intervals up to scatter_size set in config (default: 50)
-    SPLIT, = glob_wildcards(os.path.join(ivals_dir,"{split}-scattered.interval_list"))
+    SPLIT, = glob_wildcards(os.path.join(ivals_dir,"00{split}-scattered.interval_list"))
     # return list of split intervals
-    return expand(os.path.join(ivals_dir,"{sample_name}.{split}.g.vcf.gz"),sample_name=sample_name,split=SPLIT)
+    return expand(os.path.join(ivals_dir,"{sample_name}.00{split}.g.vcf.gz"),sample_name=sample_name,split=SPLIT)
 
 rule merge_gvcfs:
     input:
         get_gvcfs
     output:
-        final_gvcf = S3.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/{sample_name}.{ref}.g.vcf.gz"),
-        final_tbi  = S3.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/{sample_name}.{ref}.g.vcf.gz.tbi"),
+        final_gvcf = SFTP.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/{sample_name}.{ref}.g.vcf.gz"),
+        final_tbi  = SFTP.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/{sample_name}.{ref}.g.vcf.gz.tbi"),
     params:
         gvcfs     = lambda wildcards, input: " -INPUT ".join(map(str,input)),
         java_opt  = "-Xmx2000m",
@@ -97,7 +97,7 @@ rule merge_gvcfs:
          mem_mb = 4000
     shell:
         '''
-            gatk --java-options {params.java_opt} \
+            gatk --java-options {params.java_opt}  \
                 MergeVcfs \
                 --INPUT {params.gvcfs} \
                 --OUTPUT {output.final_gvcf}

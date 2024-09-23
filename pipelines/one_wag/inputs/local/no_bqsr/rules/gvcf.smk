@@ -21,8 +21,6 @@ if "Thoroughbred" not in config['ref']:
             '''
 
     checkpoint split_intervals:
-        input:
-            acgt_ivals = "{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/hc_intervals/acgt.interval_list",
         output:
             directory("{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/hc_intervals/scattered")
         params:
@@ -48,7 +46,7 @@ else:
             acgt_ivals = "{bucket}/wgs/{breed}/{sample_name}/{ref}/gvcf/hc_intervals/acgt.interval_list",
         params:
             ref_dict = config['ref_dict'],
-            tb_gaps  = "TB-T2T_gaps.csv"
+            tb_gaps  = "/home/refgen/horse/Thoroughbred/resources/TB-T2T_gaps.csv"
         threads: 1
         run:
             dict_lines, chrom_lengths = read_genome_dict(params.ref_dict)

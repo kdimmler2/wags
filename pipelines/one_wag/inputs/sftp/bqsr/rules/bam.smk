@@ -3,10 +3,11 @@ rule fastqs_to_ubam:
     input:
         unpack(get_fastq),
     output:
-        ubam = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.unmapped.bam")
+        ubam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.unmapped.bam"
     params:
         java_opt          = "-Xms6000m",
         ref_fasta         = config['ref_fasta'],
+       #tmp_dir           = f"/dev/shm/{os.environ['USER']}/{{readgroup_name}}_{config['ref']}/",
         tmp_dir           = config['tmp_dir']['fastq_tmp'],
         library_name      = lambda wildcards: units.loc[units["readgroup_name"] == wildcards.readgroup_name,"library_name"].values[0],
         platform_unit     = lambda wildcards: units.loc[units["readgroup_name"] == wildcards.readgroup_name,"platform_unit"].values[0],
@@ -21,49 +22,28 @@ rule fastqs_to_ubam:
          mem_mb = lambda wildcards, attempt: 2**(attempt-1)*40000,
     shell:
         '''
-            if [ {input.r1} == {input.r2} ]; then
-                echo "Processing {wildcards.sample_name} as SINGLE"
+            mkdir -p {params.tmp_dir}
 
-                mkdir -p {params.tmp_dir}
-
-                gatk --java-options {params.java_opt} \
-                    FastqToSam \
-                    --TMP_DIR {params.tmp_dir} \
-                    --FASTQ {input.r1} \
-                    --OUTPUT {output.ubam} \
-                    --READ_GROUP_NAME {wildcards.readgroup_name} \
-                    --SAMPLE_NAME {wildcards.sample_name} \
-                    --LIBRARY_NAME {params.library_name} \
-                    --PLATFORM_UNIT {params.platform_unit} \
-                    --RUN_DATE {params.run_date} \
-                    --PLATFORM {params.platform_name} \
-                    --SEQUENCING_CENTER {params.sequencing_center}
-            else
-                echo "Procesing {wildcards.sample_name} as PAIRED" 
-                mkdir -p {params.tmp_dir}
-
-                gatk --java-options {params.java_opt} \
-                    FastqToSam \
-                    --TMP_DIR {params.tmp_dir} \
-                    --FASTQ {input.r1} \
-                    --FASTQ2 {input.r2} \
-                    --OUTPUT {output.ubam} \
-                    --READ_GROUP_NAME {wildcards.readgroup_name} \
-                    --SAMPLE_NAME {wildcards.sample_name} \
-                    --LIBRARY_NAME {params.library_name} \
-                    --PLATFORM_UNIT {params.platform_unit} \
-                    --RUN_DATE {params.run_date} \
-                    --PLATFORM {params.platform_name} \
-                    --SEQUENCING_CENTER {params.sequencing_center}
-            fi
+            gatk --java-options {params.java_opt} \
+                FastqToSam \
+                --TMP_DIR {params.tmp_dir} \
+                --FASTQ {input.r1} \
+                --FASTQ2 {input.r2} \
+                --OUTPUT {output.ubam} \
+                --READ_GROUP_NAME {wildcards.readgroup_name} \
+                --SAMPLE_NAME {wildcards.sample_name} \
+                --LIBRARY_NAME {params.library_name} \
+                --PLATFORM_UNIT {params.platform_unit} \
+                --RUN_DATE {params.run_date} \
+                --PLATFORM {params.platform_name} \
+                --SEQUENCING_CENTER {params.sequencing_center}
         '''
-
 
 rule mark_adapters:
     input:
         ubam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.unmapped.bam"
     output:
-        mark_adapt = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.mark_adapt.unmapped.bam"),
+        mark_adapt = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.mark_adapt.unmapped.bam",
         metrics    = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.mark_adapt.metrics.txt"
     params:
         tmp_dir = f"/dev/shm/{os.environ['USER']}/{{readgroup_name}}_mark_adapt/"
@@ -90,7 +70,7 @@ rule sam_to_fastq_and_bwa_mem:
         mark_adapt = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.mark_adapt.unmapped.bam",
     output:
         bwa_log = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.{ref}_aligned.unmerged.bwa.stderr.log",
-        bam     = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.{ref}_aligned.unmerged.bam")
+        bam     = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.{ref}_aligned.unmerged.bam"
     params:
         tmp_dir   = f"/dev/shm/{os.environ['USER']}/{{readgroup_name}}_sam_fastq/",
         java_opt  = "-Xms3000m",
@@ -135,7 +115,7 @@ rule merge_bam_alignment:
         ubam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.unmapped.bam",
         bam  = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.{ref}_aligned.unmerged.bam"
     output:
-        merged_bam = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.{ref}.merged.unsorted.bam")
+        merged_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.{ref}.merged.unsorted.bam"
     params:
         java_opt   = "-Xms3000m",
         bwa_cl     = "mem -K 100000000 -p -v 3 -t 16 -Y",
@@ -187,7 +167,7 @@ rule mark_duplicates:
             readgroup_name=list(units['readgroup_name']),
         )
     output:
-        dedup_bam = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.unsorted.duplicates_marked.bam"),
+        dedup_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.unsorted.duplicates_marked.bam",
         metrics   = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.duplicate_metrics",
     params:
         bams       = lambda wildcards, input: " --INPUT ".join(map(str,input.merged_bams)),
@@ -219,8 +199,8 @@ rule sort_and_fix_tags:
     input:
         dedup_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.unsorted.duplicates_marked.bam",
     output:
-        sorted_bam = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bam"),
-        sorted_bai = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bai")
+        sorted_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bam",
+        sorted_bai = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bai"
     params:
         java_opt  = "-Xms4000m",
         tmp_dir   = config['tmp_dir']['sort_tmp'],
@@ -260,8 +240,8 @@ if config['left_align']:
             sorted_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bam",
             sorted_bai = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bai"
         output:
-            left_bam = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.duplicate_marked.sorted.bam"),
-            left_bai = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.duplicate_marked.sorted.bai")
+            left_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.duplicate_marked.sorted.bam",
+            left_bai = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.duplicate_marked.sorted.bai"
         params:
             java_opt  = "-Xms4000m",
             ref_fasta = config['ref_fasta']
@@ -286,7 +266,7 @@ rule base_recalibrator:
     input:
         sorted_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bam"
             if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.duplicate_marked.sorted.bam",
-        interval   = "{bucket}/seq_group/with_unmap/{interval}.tsv"
+        interval   = "{bucket}/seq_group/no_unmap/{interval}.tsv"
     output:
         recal_csv = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.{interval}.recal_data.csv"
     params:
@@ -320,7 +300,7 @@ rule gather_bqsr_reports:
                 breed=breed,
                 sample_name=sample_name,
                 ref=config["ref"],
-                interval=intervals[:-1]
+                interval=intervals
             ), key=lambda item: int(os.path.basename(item).split(".")[-3].split("_")[1])
         )
     output:
@@ -350,10 +330,10 @@ rule apply_bqsr:
         report     = "{bucket}/wgs/{breed}/{sample_name}/{ref}/logs/{sample_name}.{ref}.recal_data.txt",
         interval   = "{bucket}/seq_group/with_unmap/{interval}.tsv"
     output:
-        recal_bam = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.{interval}.aligned.duplicates_marked.recalibrated.bam")
-            if not config['left_align'] else temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.{interval}.left_aligned.duplicates_marked.recalibrated.bam"),
-        recal_bai = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.{interval}.aligned.duplicates_marked.recalibrated.bai")
-            if not config['left_align'] else temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.{interval}.left_aligned.duplicates_marked.recalibrated.bai")
+        recal_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.{interval}.aligned.duplicates_marked.recalibrated.bam"
+            if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.{interval}.left_aligned.duplicates_marked.recalibrated.bam",
+        recal_bai = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.{interval}.aligned.duplicates_marked.recalibrated.bai"
+            if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.{interval}.left_aligned.duplicates_marked.recalibrated.bai"
     params:
         ival = lambda wildcards, input: open(input.interval).readline().rstrip().replace('\t',' -L '),
         java_opt  = "-Xms3000m",
@@ -388,14 +368,16 @@ rule gather_bam_files:
                 breed=breed,
                 sample_name=sample_name,
                 ref=config["ref"],
-                interval=intervals
-            ), key=lambda item: int(os.path.basename(item).split(".")[-5].split("_")[1])
+                interval=unmap_intervals
+            ), key=lambda item: int(os.path.basename(item).split(".")[2].split("_")[1])
         )
     output:
-        final_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.bam"
-            if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.bam",
-        final_bai = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.bai"
-            if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.bai",
+        final_bam = SFTP.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.bam")
+            if not config['left_align'] else SFTP.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.bam"),
+        final_bai = SFTP.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.bai")
+            if not config['left_align'] else SFTP.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.bai"),
+        final_md5 = SFTP.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.bam.md5")
+            if not config['left_align'] else SFTP.remote("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.md5"),
     params:
         bams     = lambda wildcards, input: " -I ".join(map(str,input.recal_bams)),
         java_opt = "-Xms2000m",
@@ -415,46 +397,13 @@ rule gather_bam_files:
                 --CREATE_MD5_FILE true
         '''
 
-rule bam_to_cram:
-    input:
-        final_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.bam"
-            if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.bam",
-        final_bai = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.bai"
-            if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.bai",
-    output:
-        final_cram = "{bucket}/wgs/{breed}/{sample_name}/{ref}/cram/{sample_name}.{ref}.cram"
-            if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/cram/{sample_name}.{ref}.left_aligned.cram",
-        final_crai = "{bucket}/wgs/{breed}/{sample_name}/{ref}/cram/{sample_name}.{ref}.cram.crai"
-            if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/cram/{sample_name}.{ref}.left_aligned.cram.crai",
-        final_md5 = "{bucket}/wgs/{breed}/{sample_name}/{ref}/cram/{sample_name}.{ref}.cram.md5"
-            if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/cram/{sample_name}.{ref}.left_aligned.cram.md5",
-    params:
-        ref_fasta = config['ref_fasta'],
-    benchmark:
-        "{bucket}/wgs/{breed}/{sample_name}/{ref}/cram/{sample_name}.bam_to_cram.benchmark.txt"
-    threads: 4
-    resources:
-         time   = 600,
-         mem_mb = 60000
-    shell:
-        '''
-            samtools view \
-                -C \
-                -T {params.ref_fasta} \
-                -o {output.final_cram} \
-                {input.final_bam}
-
-            samtools index {output.final_cram}
-            md5sum {output.final_cram} > {output.final_md5}
-        '''
-
 rule post_base_recalibrator:
     input:
         final_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.bam"
             if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.bam",
         final_bai = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.bai"
             if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.bai",
-        interval  = "{bucket}/seq_group/with_unmap/{interval}.tsv"
+        interval  = "{bucket}/seq_group/no_unmap/{interval}.tsv"
     output:
         recal_csv = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/post_clean/{sample_name}.{ref}.{interval}.second_recal_data.csv"
     params:
@@ -465,7 +414,7 @@ rule post_base_recalibrator:
     benchmark:
         "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/post_clean/{sample_name}.{interval}.second_base_recal.benchmark.txt"
     resources:
-         time   = 120,
+         time   = 30,
          mem_mb = 20000
     shell:
         '''
@@ -488,7 +437,7 @@ rule post_gather_bqsr_reports:
                 breed=breed,
                 sample_name=sample_name,
                 ref=config["ref"],
-                interval=intervals[:-1]
+                interval=intervals
             ), key=lambda item: int(os.path.basename(item).split(".")[-3].split("_")[1])
         )
     output:

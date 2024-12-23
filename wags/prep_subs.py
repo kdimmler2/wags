@@ -396,7 +396,7 @@ def main():
             "#SBATCH --nodes=1\n"
             "#SBATCH --ntasks-per-node=1\n"
             "#SBATCH --cpus-per-task=1\n"
-            "#SBATCH --mem=12gb\n"
+            "#SBATCH --mem=2gb\n"
             "#SBATCH --mail-type=ALL\n"
             f"#SBATCH --mail-user={email}\n"
             f"#SBATCH --job-name {v['breed']}_{k}.{job_name}.{profile}\n"
@@ -423,8 +423,11 @@ def main():
                 print(lsf_header, file=f)
             else:
                 print(default_header, file=f)
+            print("cp /scratch.global/dimml002/wags/probes_liftover.bed .\n", file=f)
             print("set -e\n",file=f)
-            print(f"micromamba activate {snake_env}",file=f)
+            print("source /users/7/dimml002/miniforge3/etc/profile.d/conda.sh", file=f)
+            print(f"conda activate {snake_env}",file=f)
+
             if profile != 'lsf':
                 print("cd $SLURM_SUBMIT_DIR\n",file=f)
 

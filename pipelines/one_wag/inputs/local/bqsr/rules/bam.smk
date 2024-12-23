@@ -17,8 +17,8 @@ rule fastqs_to_ubam:
         "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.fastqs_to_ubam.benchmark.txt"
     threads: 4
     resources:
-         time   = 400,
-         mem_mb = lambda wildcards, attempt: 2**(attempt-1)*40000,
+         time   = 30,
+         mem_mb = lambda wildcards, attempt: 2**(attempt-1)*6000,
     shell:
         '''
             if [ {input.r1} == {input.r2} ]; then
@@ -71,8 +71,8 @@ rule mark_adapters:
         "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.mark_adapters.benchmark.txt"
     threads: 4
     resources:
-         time   = 800,
-         mem_mb = lambda wildcards, attempt: 2**(attempt-1)*20000,
+         time   = 30,
+         mem_mb = lambda wildcards, attempt: 2**(attempt-1)*2000,
     shell:
         '''
             mkdir -p {params.tmp_dir}
@@ -100,8 +100,8 @@ rule sam_to_fastq_and_bwa_mem:
         "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.sam_to_fq_bwa.benchmark.txt"
     threads: 16
     resources:
-         time   = 1440,
-         mem_mb = lambda wildcards, attempt: 2**(attempt-1)*60000,
+         time   = 30,
+         mem_mb = lambda wildcards, attempt: 2**(attempt-1)*12000,
     shell:
         '''
             set -o pipefail
@@ -127,15 +127,47 @@ rule sam_to_fastq_and_bwa_mem:
             samtools view -1 - > {output.bam}
         '''
 
+rule amplicon_clip:
+    input:
+        bam     = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.{ref}_aligned.unmerged.bam"
+    output:
+        clipped_bam     = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.{ref}_aligned.unmerged.clipped.bam")
+    params:
+        tmp_dir   = f"/dev/shm/{os.environ['USER']}/{{readgroup_name}}_sam_fastq/",
+        java_opt  = "-Xms3000m",
+        #bwa_cl    = "mem -K 100000000 -p -v 3 -t 16 -Y",
+        ref_fasta = config['ref_fasta'],
+        probe_file = config['probe_file'],
+    threads: 16
+    resources:
+         time   = 30,
+         mem_mb = lambda wildcards, attempt: 2**(attempt-1)*6000,
+    shell:
+        '''
+            set -o pipefail
+            set -e
+
+            mkdir -p {params.tmp_dir}
+
+            # set the bash variable needed for the command-line
+            bash_ref_fasta={params.ref_fasta}
+            
+            samtools ampliconclip -u --soft-clip --both-ends --strand -b {params.probe_file} {input.bam} | \
+            samtools sort -n -@ 16 -u | \
+            samtools fixmate -@ 16 -u - - | \
+            samtools sort -u -@ 16 | \
+            samtools calmd -u -@ 16 - {params.ref_fasta} \
+            samtools view -b > {output.clipped_bam}
+        '''
 # get bwa version
 #BWA_VER=$(bwa 2>&1 | rg -e '^Version' | sed 's/Version: //' 2>&1)
 
 rule merge_bam_alignment:
     input:
         ubam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.unmapped.bam",
-        bam  = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.{ref}_aligned.unmerged.bam"
+        clipped_bam  = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.{ref}_aligned.unmerged.clipped.bam"
     output:
-        merged_bam = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.{ref}.merged.unsorted.bam")
+        merged_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.{ref}.merged.unsorted.clipped.bam"
     params:
         java_opt   = "-Xms3000m",
         bwa_cl     = "mem -K 100000000 -p -v 3 -t 16 -Y",
@@ -145,7 +177,7 @@ rule merge_bam_alignment:
         "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.merge_bams.benchmark.txt"
     threads: 4
     resources:
-        time   = 720,
+        time   = 30,
         mem_mb = lambda wildcards, attempt: 2**(attempt-1)*12000,
     shell:
         '''
@@ -154,7 +186,7 @@ rule merge_bam_alignment:
                 --VALIDATION_STRINGENCY SILENT \
                 --EXPECTED_ORIENTATIONS FR \
                 --ATTRIBUTES_TO_RETAIN X0 \
-                --ALIGNED_BAM {input.bam} \
+                --ALIGNED_BAM {input.clipped_bam} \
                 --UNMAPPED_BAM {input.ubam} \
                 --OUTPUT {output.merged_bam} \
                 --REFERENCE_SEQUENCE {params.ref_fasta} \
@@ -176,10 +208,49 @@ rule merge_bam_alignment:
                 --UNMAP_CONTAMINANT_READS true
         '''
 
-rule mark_duplicates:
+#rule mark_duplicates:
+#    input:
+#        merged_bams = expand(
+#            "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.{ref}.merged.unsorted.bam",
+#            bucket=config['bucket'],
+#            breed=breed,
+#            sample_name=sample_name,
+#            ref=config['ref'], 
+#            readgroup_name=list(units['readgroup_name']),
+#        )
+#    output:
+#        dedup_bam = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.unsorted.duplicates_marked.bam"),
+#        metrics   = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.duplicate_metrics",
+#    params:
+#        bams       = lambda wildcards, input: " --INPUT ".join(map(str,input.merged_bams)),
+#        java_opt   = "-Xms4000m -Xmx16g",
+#        tmp_dir    = "/dev/shm/{sample_name}_{ref}.md.tmp"
+#    benchmark:
+#        "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.mark_duplicates.benchmark.txt"
+#    threads: 4
+#    resources:
+#         time   = 720,
+#         mem_mb = lambda wildcards, attempt: 2**(attempt-1)*60000,
+#    shell:
+#        '''
+#            mkdir -p {params.tmp_dir}
+#
+#            gatk --java-options "-Dsamjdk.compression_level=5 {params.java_opt}" \
+#                MarkDuplicates \
+#                --TMP_DIR {params.tmp_dir} \
+#                --INPUT {params.bams} \
+#                --OUTPUT {output.dedup_bam} \
+#                --METRICS_FILE {output.metrics} \
+#                --VALIDATION_STRINGENCY SILENT \
+#                --OPTICAL_DUPLICATE_PIXEL_DISTANCE 2500 \
+#                --ASSUME_SORT_ORDER "queryname" \
+#                --CREATE_MD5_FILE true
+#        '''
+
+rule sort_and_fix_tags:
     input:
         merged_bams = expand(
-            "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.{ref}.merged.unsorted.bam",
+            "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{readgroup_name}.{ref}.merged.unsorted.clipped.bam",
             bucket=config['bucket'],
             breed=breed,
             sample_name=sample_name,
@@ -187,40 +258,8 @@ rule mark_duplicates:
             readgroup_name=list(units['readgroup_name']),
         )
     output:
-        dedup_bam = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.unsorted.duplicates_marked.bam"),
-        metrics   = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.duplicate_metrics",
-    params:
-        bams       = lambda wildcards, input: " --INPUT ".join(map(str,input.merged_bams)),
-        java_opt   = "-Xms4000m -Xmx16g",
-        tmp_dir    = "/dev/shm/{sample_name}_{ref}.md.tmp"
-    benchmark:
-        "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.mark_duplicates.benchmark.txt"
-    threads: 4
-    resources:
-         time   = 720,
-         mem_mb = lambda wildcards, attempt: 2**(attempt-1)*60000,
-    shell:
-        '''
-            mkdir -p {params.tmp_dir}
-
-            gatk --java-options "-Dsamjdk.compression_level=5 {params.java_opt}" \
-                MarkDuplicates \
-                --TMP_DIR {params.tmp_dir} \
-                --INPUT {params.bams} \
-                --OUTPUT {output.dedup_bam} \
-                --METRICS_FILE {output.metrics} \
-                --VALIDATION_STRINGENCY SILENT \
-                --OPTICAL_DUPLICATE_PIXEL_DISTANCE 2500 \
-                --ASSUME_SORT_ORDER "queryname" \
-                --CREATE_MD5_FILE true
-        '''
-
-rule sort_and_fix_tags:
-    input:
-        dedup_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.unsorted.duplicates_marked.bam",
-    output:
-        sorted_bam = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bam"),
-        sorted_bai = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bai")
+        sorted_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.clipped.sorted.bam",
+        sorted_bai = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.clipped.sorted.bai",
     params:
         java_opt  = "-Xms4000m",
         tmp_dir   = config['tmp_dir']['sort_tmp'],
@@ -229,8 +268,8 @@ rule sort_and_fix_tags:
         "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.merge_bams.benchmark.txt"
     threads: 12
     resources:
-         time   = 720,
-         mem_mb = lambda wildcards, attempt: 2**(attempt-1)*24000,
+         time   = 30,
+         mem_mb = lambda wildcards, attempt: 2**(attempt-1)*6000,
     shell:
         '''
             set -o pipefail
@@ -238,7 +277,7 @@ rule sort_and_fix_tags:
             gatk --java-options "-Dsamjdk.compression_level=5 {params.java_opt}" \
                 SortSam \
                 --TMP_DIR {params.tmp_dir} \
-                --INPUT {input.dedup_bam} \
+                --INPUT {input.merged_bams} \
                 --OUTPUT /dev/stdout \
                 --SORT_ORDER "coordinate" \
                 --CREATE_INDEX false \
@@ -257,11 +296,11 @@ rule sort_and_fix_tags:
 if config['left_align']:
     rule left_align_bam:
         input:
-            sorted_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bam",
-            sorted_bai = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bai"
+            sorted_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.clipped.sorted.bam",
+            sorted_bai = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.clipped.sorted.bai"
         output:
-            left_bam = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.duplicate_marked.sorted.bam"),
-            left_bai = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.duplicate_marked.sorted.bai")
+            left_bam = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.clipped.sorted.bam"),
+            left_bai = temp("{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.clipped.sorted.bai")
         params:
             java_opt  = "-Xms4000m",
             ref_fasta = config['ref_fasta']
@@ -269,8 +308,8 @@ if config['left_align']:
             "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.sort_fix_left_align.benchmark.txt"
         threads: 4
         resources:
-             time   = 480,
-             mem_mb = lambda wildcards, attempt: 2**(attempt-1)*24000,
+             time   = 30,
+             mem_mb = lambda wildcards, attempt: 2**(attempt-1)*6000,
         shell:
             '''
                 gatk --java-options "-Dsamjdk.compression_level=5 {params.java_opt}" \
@@ -284,8 +323,8 @@ if config['left_align']:
 
 rule base_recalibrator:
     input:
-        sorted_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bam"
-            if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.duplicate_marked.sorted.bam",
+        sorted_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.clipped.sorted.bam"
+            if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.clipped.sorted.bam",
         interval   = "{bucket}/seq_group/with_unmap/{interval}.tsv"
     output:
         recal_csv = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.{interval}.recal_data.csv"
@@ -343,10 +382,10 @@ rule gather_bqsr_reports:
         
 rule apply_bqsr:
     input:
-        sorted_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bam"
-            if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.duplicate_marked.sorted.bam",
-        sorted_bai = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.duplicate_marked.sorted.bai"
-            if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.duplicate_marked.sorted.bai",
+        sorted_bam = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.clipped.sorted.bam"
+            if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.clipped.sorted.bam",
+        sorted_bai = "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.aligned.clipped.sorted.bai"
+            if not config['left_align'] else "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{ref}.left_aligned.clipped.sorted.bai",
         report     = "{bucket}/wgs/{breed}/{sample_name}/{ref}/logs/{sample_name}.{ref}.recal_data.txt",
         interval   = "{bucket}/seq_group/with_unmap/{interval}.tsv"
     output:
@@ -361,7 +400,7 @@ rule apply_bqsr:
     benchmark:
         "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.{interval}.apply_bqsr.benchmark.txt"
     resources:
-         time   = 180,
+         time   = 30,
          mem_mb = 10000
     shell:
         '''
@@ -403,8 +442,8 @@ rule gather_bam_files:
         "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/{sample_name}.gather_bams.benchmark.txt"
     threads: 4
     resources:
-         time   = 180,
-         mem_mb = 16000
+         time   = 30,
+         mem_mb = 6000
     shell:
         '''
             gatk --java-options "-Dsamjdk.compression_level=5 {params.java_opt}" \
@@ -434,8 +473,8 @@ rule bam_to_cram:
         "{bucket}/wgs/{breed}/{sample_name}/{ref}/cram/{sample_name}.bam_to_cram.benchmark.txt"
     threads: 4
     resources:
-         time   = 600,
-         mem_mb = 60000
+         time   = 30,
+         mem_mb = 6000
     shell:
         '''
             samtools view \
@@ -465,8 +504,8 @@ rule post_base_recalibrator:
     benchmark:
         "{bucket}/wgs/{breed}/{sample_name}/{ref}/bam/post_clean/{sample_name}.{interval}.second_base_recal.benchmark.txt"
     resources:
-         time   = 120,
-         mem_mb = 20000
+         time   = 30,
+         mem_mb = 6000
     shell:
         '''
             gatk --java-options {params.java_opt} \

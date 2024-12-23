@@ -1,5 +1,11 @@
 # Pipeline
 results/
+data_preprocessing/
+s3.slurm
+FASTQs/
+Analysis/
+wags/.nfs56fd622e1b885dfa000011cf
+wags.sif
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

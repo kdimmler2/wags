@@ -30,6 +30,9 @@ known_sites :
   dbsnp_snp_vcf  : /home/refgen/horse/goldenPath/resources/equus_caballus.chrIDmod.vcf.gz
   mnec2m_snp_vcf : /home/refgen/horse/goldenPath/resources/MNEc2M.EquCab3.09182018.recode.rmGT.refseqnames.chrIDmod.vcf.gz
 
+# Allegro Probe File
+probe_file : probes_liftover.bed
+
 # SV CONDA ENVS
 conda_envs :
   delly  : delly

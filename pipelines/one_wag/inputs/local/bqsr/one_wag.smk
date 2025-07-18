@@ -45,17 +45,17 @@ rule all:
 #            ref=config['ref'],
 #        ),
         # multiqc
-        expand(
-            "{bucket}/wgs/{breed}/{sample_name}/{ref}/qc/multiqc_report.html",
-            bucket=config['bucket'],
-            breed=breed,
-            sample_name=sample_name,
-            ref=config["ref"],
-            
-        ),
+#        expand(
+#            "{bucket}/wgs/{breed}/{sample_name}/{ref}/qc/multiqc_report.html",
+#            bucket=config['bucket'],
+#            breed=breed,
+#            sample_name=sample_name,
+#            ref=config["ref"],
+#            
+#        ),
 
 # rules to include based on user setup
-include: "rules/qc.smk"
+#include: "rules/qc.smk"
 include: "rules/bam.smk"
 #include: "rules/sv.smk"
 include: "rules/gvcf.smk"
